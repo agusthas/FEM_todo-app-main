@@ -12,6 +12,7 @@ import {
 } from '@mantine/core';
 import { UseListStateHandlers } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
+import { DragDropContext, Draggable, Droppable } from 'react-beautiful-dnd';
 import checkIcon from '../assets/icon-check.svg';
 import crossIcon from '../assets/icon-cross.svg';
 import { useTodos } from '../contexts/TodoContext';
@@ -79,6 +80,7 @@ export const useStyles = createStyles(
       opacity: 1,
       textDecoration: completed ? 'line-through' : 'none',
       cursor: 'initial',
+      pointerEvents: 'none',
     },
 
     todoInput: {
@@ -88,6 +90,11 @@ export const useStyles = createStyles(
     todoDeleteButton: {
       ref: getRef('todoDeleteButton'),
       opacity: 0,
+    },
+
+    todoDragging: {
+      boxShadow: theme.shadows.lg,
+      border: 'none',
     },
   })
 );
@@ -101,40 +108,53 @@ function Todo({
   index: number;
   handlers: UseListStateHandlers<ITodo>;
 }) {
-  const { classes } = useStyles(todo.completed);
+  const { classes, cx } = useStyles(todo.completed);
   return (
-    <div className={classes.wrapper}>
-      <Checkbox
-        icon={({ className }) => <img src={checkIcon} className={className} />}
-        size="md"
-        radius="lg"
-        checked={todo.completed}
-        onChange={() =>
-          handlers.setItemProp(index, 'completed', !todo.completed)
-        }
-        classNames={{
-          root: classes.todoCheckbox,
-          input: classes.todoCheckboxInput,
-        }}
-      />
-      <TextInput
-        size="lg"
-        disabled
-        variant="unstyled"
-        value={todo.title}
-        classNames={{
-          root: classes.todoInput,
-          disabled: classes.todoInputDisabled,
-        }}
-      />
+    <Draggable key={todo.title} index={index} draggableId={todo.title}>
+      {(provided, snapshot) => (
+        <div
+          className={cx(classes.wrapper, {
+            [classes.todoDragging]: snapshot.isDragging,
+          })}
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+        >
+          <Checkbox
+            icon={({ className }) => (
+              <img src={checkIcon} className={className} />
+            )}
+            size="md"
+            radius="lg"
+            checked={todo.completed}
+            onChange={() =>
+              handlers.setItemProp(index, 'completed', !todo.completed)
+            }
+            classNames={{
+              root: classes.todoCheckbox,
+              input: classes.todoCheckboxInput,
+            }}
+          />
+          <TextInput
+            size="lg"
+            disabled
+            variant="unstyled"
+            value={todo.title}
+            classNames={{
+              root: classes.todoInput,
+              disabled: classes.todoInputDisabled,
+            }}
+          />
 
-      <ActionIcon
-        className={classes.todoDeleteButton}
-        onClick={() => handlers.remove(index)}
-      >
-        <img src={crossIcon} />
-      </ActionIcon>
-    </div>
+          <ActionIcon
+            className={classes.todoDeleteButton}
+            onClick={() => handlers.remove(index)}
+          >
+            <img src={crossIcon} />
+          </ActionIcon>
+        </div>
+      )}
+    </Draggable>
   );
 }
 
@@ -161,24 +181,55 @@ export function TodoList() {
           overflow: 'hidden',
         })}
       >
-        <ScrollArea style={{ height: 430 }}>
-          {filtered === 'All' &&
-            todos.map((todo, i) => (
-              <Todo key={i} index={i} todo={todo} handlers={handlers} />
-            ))}
-          {filtered === 'Active' &&
-            todos
-              .filter((todo) => !todo.completed)
-              .map((todo, i) => (
-                <Todo key={i} index={i} todo={todo} handlers={handlers} />
-              ))}
-          {filtered === 'Completed' &&
-            todos
-              .filter((todo) => todo.completed)
-              .map((todo, i) => (
-                <Todo key={i} index={i} todo={todo} handlers={handlers} />
-              ))}
-        </ScrollArea>
+        <DragDropContext
+          onDragEnd={({ source, destination }) => {
+            if (!destination) {
+              return;
+            }
+
+            if (destination.index === source.index) {
+              return;
+            }
+
+            handlers.reorder({
+              from: source.index,
+              to: destination?.index || 0,
+            });
+          }}
+        >
+          <Droppable droppableId="dnd-todo-list" direction="vertical">
+            {(provided) => (
+              <ScrollArea
+                sx={(theme) => ({
+                  height: 420,
+                  [theme.fn.smallerThan('md')]: {
+                    height: 300,
+                  },
+                })}
+                viewportRef={provided.innerRef}
+                {...provided.droppableProps}
+              >
+                {filtered === 'All' &&
+                  todos.map((todo, i) => (
+                    <Todo key={i} index={i} todo={todo} handlers={handlers} />
+                  ))}
+                {filtered === 'Active' &&
+                  todos
+                    .filter((todo) => !todo.completed)
+                    .map((todo, i) => (
+                      <Todo key={i} index={i} todo={todo} handlers={handlers} />
+                    ))}
+                {filtered === 'Completed' &&
+                  todos
+                    .filter((todo) => todo.completed)
+                    .map((todo, i) => (
+                      <Todo key={i} index={i} todo={todo} handlers={handlers} />
+                    ))}
+                {provided.placeholder}
+              </ScrollArea>
+            )}
+          </Droppable>
+        </DragDropContext>
 
         <Group position="apart" p="md">
           <Text
@@ -193,7 +244,7 @@ export function TodoList() {
             {todosLeft} items left
           </Text>
 
-          <MediaQuery smallerThan="md" styles={{ display: 'none' }}>
+          <MediaQuery smallerThan="sm" styles={{ display: 'none' }}>
             <Group>
               {todoTypes.map((text) => (
                 <UnstyledButton
@@ -245,6 +296,51 @@ export function TodoList() {
           </UnstyledButton>
         </Group>
       </Paper>
+
+      <MediaQuery
+        largerThan="sm"
+        styles={{
+          display: 'none',
+        }}
+      >
+        <Group
+          position="center"
+          p="md"
+          mt="lg"
+          sx={(theme) => ({
+            borderRadius: theme.radius.xs,
+            backgroundColor:
+              theme.colorScheme === 'dark'
+                ? 'var(--todo-bg-dark)'
+                : 'var(--todo-bg-light)',
+          })}
+        >
+          {todoTypes.map((text) => (
+            <UnstyledButton
+              key={text}
+              sx={(theme) => ({
+                fontWeight: 'bold',
+                color:
+                  filtered === text
+                    ? 'var(--bright-blue)'
+                    : theme.colorScheme === 'dark'
+                    ? 'var(--very-dark-grayish-blue-dark)'
+                    : 'var(--dark-grayish-blue)',
+
+                '&:hover': {
+                  color:
+                    theme.colorScheme === 'dark'
+                      ? 'var(--light-grayish-blue-dark)'
+                      : 'var(--very-dark-grayish-blue)',
+                },
+              })}
+              onClick={() => setFiltered(text)}
+            >
+              <Text size="sm">{text}</Text>
+            </UnstyledButton>
+          ))}
+        </Group>
+      </MediaQuery>
 
       <Text align="center" mt={40}>
         Drag and drop to reorder list
